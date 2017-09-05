@@ -20,19 +20,19 @@ namespace cAlgo
         [Parameter("Sell Enabled", DefaultValue = true)]
         public bool SellEnabled { get; set; }
 
-        [Parameter("Pip Step", DefaultValue = 10, MinValue = 1)]
+        [Parameter("Pip Step", DefaultValue = 1, MinValue = 1)]
         public int PipStep { get; set; }
 
         [Parameter("First Volume", DefaultValue = 1000, MinValue = 1000, Step = 1000)]
         public int FirstVolume { get; set; }
 
-        [Parameter("Volume Exponent", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 5.0)]
+        [Parameter("Volume Exponent", DefaultValue = 2.8, MinValue = 0.1, MaxValue = 5.0)]
         public double VolumeExponent { get; set; }
 
-        [Parameter("Max Spread", DefaultValue = 3.0)]
+        [Parameter("Max Spread", DefaultValue = 3)]
         public double MaxSpread { get; set; }
 
-        [Parameter("Take Profit Average", DefaultValue = 3, MinValue = 1)]
+        [Parameter("Take Profit Average", DefaultValue = 21, MinValue = 1)]
         public int TakeProfitAverage { get; set; }
 
         private string Label = "cls";
@@ -53,7 +53,7 @@ namespace cAlgo
                 if (TotalOpenPositions(TradeType.Sell) > 0)
                     SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAverage);
 
-                if (MaxSpread >= spreedValue && !stopped)
+                if (spreedValue <= MaxSpread && !stopped)
                     OpenPosition();
             } catch (Exception e)
             {
@@ -69,8 +69,10 @@ namespace cAlgo
             {
                 stopped = true;
 
-                Print("openning stopped because: not enough money");
+                Print("Openning stopped because: not enough money");
             }
+
+            Print("Error: ", error);
         }
 
         private void OpenPosition()
@@ -144,12 +146,12 @@ namespace cAlgo
 
             if (!result.IsSuccessful)
             {
-                Print(tradeType, "Openning Error: ", result.Error);
+                Print("Openning Error: ", result.Error);
 
                 return false;
             }
 
-            Print(tradeType, "Opened at: ", result.Position.EntryPrice);
+            Print("Opened at: ", result.Position.EntryPrice);
 
             return true;
         }
@@ -259,7 +261,7 @@ namespace cAlgo
             long firstVolume = GetFirstVolume(tradeType);
             int totalOperation = GetTotalOperationOnPrice(tradeType, firstEntryPrice);
 
-            return Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation));
+            return Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation <= 0 ? 1 : totalOperation));
         }
     }
 }
