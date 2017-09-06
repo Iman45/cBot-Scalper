@@ -20,20 +20,23 @@ namespace cAlgo
         [Parameter("Sell Enabled", DefaultValue = true)]
         public bool SellEnabled { get; set; }
 
-        [Parameter("Pip Step", DefaultValue = 1, MinValue = 1)]
-        public int PipStep { get; set; }
+        [Parameter("Pip Step", DefaultValue = 1, MinValue = 0.01)]
+        public double PipStep { get; set; }
 
-        [Parameter("First Volume", DefaultValue = 1000, MinValue = 1000, Step = 1000)]
-        public int FirstVolume { get; set; }
+        [Parameter("Lots", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01)]
+        public double Lots { get; set; }
 
-        [Parameter("Volume Exponent", DefaultValue = 2.8, MinValue = 0.1, MaxValue = 5.0)]
+        [Parameter("Fix Stop Loss Pips", DefaultValue = 100, MinValue = 0)]
+        public double FixStopLossPips { get; set; }
+
+        [Parameter("Volume Exponent", DefaultValue = 1, MinValue = 0.1, MaxValue = 5.0)]
         public double VolumeExponent { get; set; }
 
-        [Parameter("Max Spread", DefaultValue = 3)]
+        [Parameter("Max Spread", DefaultValue = 3, MinValue = 0)]
         public double MaxSpread { get; set; }
 
-        [Parameter("Take Profit Average", DefaultValue = 21, MinValue = 1)]
-        public int TakeProfitAverage { get; set; }
+        [Parameter("Take Profit Average Pips", DefaultValue = 21, MinValue = 0.01)]
+        public double TakeProfitAveragePips { get; set; }
 
         private string Label = "cls";
         private DateTime buyLastOpenTime;
@@ -48,10 +51,10 @@ namespace cAlgo
                 spreedValue = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
 
                 if (TotalOpenPositions(TradeType.Buy) > 0)
-                    SetBuyTakeProfit(AveragePrice(TradeType.Buy), TakeProfitAverage);
+                    SetBuyTakeProfit(AveragePrice(TradeType.Buy), TakeProfitAveragePips);
 
                 if (TotalOpenPositions(TradeType.Sell) > 0)
-                    SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAverage);
+                    SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAveragePips);
 
                 if (spreedValue <= MaxSpread && !stopped)
                     OpenPosition();
@@ -79,22 +82,22 @@ namespace cAlgo
         {
             if (BuyEnabled && TotalOpenPositions(TradeType.Buy) == 0 && MarketSeries.Close.Last(1) > MarketSeries.Close.Last(2))
             {
-                var success = SendOrder(TradeType.Buy, FirstVolume);
+                var success = SendOrder(TradeType.Buy, Symbol.QuantityToVolume(Lots));
 
                 if (success)
                     buyLastOpenTime = MarketSeries.OpenTime.Last(0);
                 else
-                    Print("First BUY openning error at: ", Symbol.Ask, "Error Type: ", LastResult.Error);
+                    Print("First BUY openning error at: {0}, Error Type: {1}", Symbol.Ask, LastResult.Error);
             }
 
             if (SellEnabled && TotalOpenPositions(TradeType.Sell) == 0 && MarketSeries.Close.Last(2) > MarketSeries.Close.Last(1))
             {
-                var success = SendOrder(TradeType.Sell, FirstVolume);
+                var success = SendOrder(TradeType.Sell, Symbol.QuantityToVolume(Lots));
 
                 if (success)
                     sellLastOpenTime = MarketSeries.OpenTime.Last(0);
                 else
-                    Print("First SELL openning error at: ", Symbol.Bid, "Error Type: ", LastResult.Error);
+                    Print("First SELL openning error at: {0}, Error Type: {1}", Symbol.Bid, LastResult.Error);
             }
 
             MakeAveragePrice();
@@ -113,7 +116,7 @@ namespace cAlgo
                     if (success)
                         buyLastOpenTime = MarketSeries.OpenTime.Last(0);
                     else
-                        Print("Next BUY openning error at: ", Symbol.Ask, "Error Type: ", LastResult.Error);
+                        Print("Next BUY openning error at: {0}, Error Type: {1}", Symbol.Ask, LastResult.Error);
                 }
             }
 
@@ -128,7 +131,7 @@ namespace cAlgo
                     if (success)
                         sellLastOpenTime = MarketSeries.OpenTime.Last(0);
                     else
-                        Print("Next SELL openning error at: ", Symbol.Bid, "Error Type: ", LastResult.Error);
+                        Print("Next SELL openning error at: {0}, Error Type: {1}", Symbol.Bid, LastResult.Error);
                 }
             }
         }
@@ -142,7 +145,7 @@ namespace cAlgo
                 return false;
             }
 
-            TradeResult result = ExecuteMarketOrder(tradeType, Symbol, volume, Label, 0, 0, 0, "smart_grid");
+            TradeResult result = ExecuteMarketOrder(tradeType, Symbol, volume, Label, FixStopLossPips, 0, 0, "smart_grid");
 
             if (!result.IsSuccessful)
             {
@@ -156,25 +159,35 @@ namespace cAlgo
             return true;
         }
 
-        private void SetBuyTakeProfit(double ai_4, int ad_8)
+        private void SetBuyTakeProfit(double averagePrice, double takeProfitAveragePips)
         {
             foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Buy))
             {
-                double? takeProfit = Math.Round(ai_4 + ad_8 * Symbol.PipSize, Symbol.Digits);
+                double? takeProfit = Math.Round(averagePrice + takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
 
                 if (position.TakeProfit != takeProfit)
-                    ModifyPosition(position, position.StopLoss, takeProfit);
+                {
+                    TradeResult result = ModifyPosition(position, position.StopLoss, takeProfit);
+
+                    if (!result.IsSuccessful)
+                        Print("Modify Error: ", result.Error);
+                }
             }
         }
 
-        private void SetSellTakeProfit(double averagePrice, int takeProfitAverage)
+        private void SetSellTakeProfit(double averagePrice, double takeProfitAveragePips)
         {
             foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Sell))
             {
-                double? takeProfit = Math.Round(averagePrice - takeProfitAverage * Symbol.PipSize, Symbol.Digits);
+                double? takeProfit = Math.Round(averagePrice - takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
 
                 if (position.TakeProfit != takeProfit)
-                    ModifyPosition(position, position.StopLoss, takeProfit);
+                {
+                    TradeResult result = ModifyPosition(position, position.StopLoss, takeProfit);
+
+                    if (!result.IsSuccessful)
+                        Print("Modify Error: ", result.Error);
+                }
             }
         }
 
@@ -245,7 +258,7 @@ namespace cAlgo
             return Positions.FindAll(Label, Symbol, tradeType).Sum(i => i.Volume);
         }
 
-        private int GetTotalOperationOnPrice(TradeType tradeType, double price)
+        private int GetTotalOperationBelowPrice(TradeType tradeType, double price)
         {
             var positions = Positions.FindAll(Label, Symbol, tradeType);
 
@@ -259,9 +272,18 @@ namespace cAlgo
         {
             double firstEntryPrice = GetFirstEntryPrice(tradeType);
             long firstVolume = GetFirstVolume(tradeType);
-            int totalOperation = GetTotalOperationOnPrice(tradeType, firstEntryPrice);
+            int totalOperation = GetTotalOperationBelowPrice(tradeType, firstEntryPrice);
 
-            return Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation <= 0 ? 1 : totalOperation));
+
+            var volume = Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation == 0 ? 1 : totalOperation));
+
+            if (volume > Symbol.VolumeMax)
+                return Symbol.VolumeMax;
+
+            if (volume < Symbol.VolumeMin)
+                return Symbol.VolumeMin;
+
+            return volume;
         }
     }
 }
