@@ -274,7 +274,6 @@ namespace cAlgo
             long firstVolume = GetFirstVolume(tradeType);
             int totalOperation = GetTotalOperationBelowPrice(tradeType, firstEntryPrice);
 
-
             var volume = Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation == 0 ? 1 : totalOperation));
 
             if (volume > Symbol.VolumeMax)
