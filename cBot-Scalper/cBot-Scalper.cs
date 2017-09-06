@@ -32,14 +32,42 @@ namespace cAlgo
         [Parameter("Max Spread", DefaultValue = 3)]
         public double MaxSpread { get; set; }
 
+        [Parameter("Stop Loss Pips", DefaultValue = 75, MinValue = 1, Step = 1)]
+        public double StopLossPips { get; set; }
+
         [Parameter("Take Profit Average", DefaultValue = 21, MinValue = 1)]
         public int TakeProfitAverage { get; set; }
+
+        [Parameter("Close On Stop", DefaultValue = false)]
+        public bool CloseOnStop { get; set; }
+
+        public bool HasRick
+        {
+            get { return UseRiskStrategy || FridayCloseOperations; }
+        }
+
+        public bool UseRiskStrategy
+        {
+            get { return Time.DayOfWeek == DayOfWeek.Friday && Time.ToUniversalTime().TimeOfDay >= fridayUseRiskStrategy; }
+        }
+
+        public bool FridayCloseOperations
+        {
+            get { return Time.DayOfWeek == DayOfWeek.Friday && Time.ToUniversalTime().TimeOfDay >= fridayCloseOperations; }
+        }
 
         private string Label = "cls";
         private DateTime buyLastOpenTime;
         private DateTime sellLastOpenTime;
         private double spreedValue;
         private bool stopped = false;
+        private double operationsBalance = 0;
+        private DateTime maxProfitDate;
+        private double maxProfit = 0;
+        private DateTime maxLossDate;
+        private double maxLoss = 0;
+        private TimeSpan fridayUseRiskStrategy = new TimeSpan(0, 0, 0);
+        private TimeSpan fridayCloseOperations = new TimeSpan(19, 0, 0);
 
         protected override void OnTick()
         {
@@ -47,14 +75,25 @@ namespace cAlgo
             {
                 spreedValue = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
 
-                if (TotalOpenPositions(TradeType.Buy) > 0)
+                GetOperationsBalance();
+
+                if (TotalOpenPositions(TradeType.Buy) > 0 && !UseRiskStrategy)
                     SetBuyTakeProfit(AveragePrice(TradeType.Buy), TakeProfitAverage);
 
-                if (TotalOpenPositions(TradeType.Sell) > 0)
+                if (TotalOpenPositions(TradeType.Sell) > 0 && !UseRiskStrategy)
                     SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAverage);
 
-                if (spreedValue <= MaxSpread && !stopped)
+                if (spreedValue <= MaxSpread && !HasRick && !stopped)
                     OpenPosition();
+
+                if (UseRiskStrategy)
+                    RiskModifyTakeProfitAndStopLoss();
+
+                if (TotalOpenPositions(TradeType.Sell) > 0 || TotalOpenPositions(TradeType.Buy) > 0)
+                    PreserveMaxProfitAndLoss();
+
+                if (FridayCloseOperations)
+                    CloseAllPositions();
             } catch (Exception e)
             {
                 Print(e);
@@ -73,6 +112,48 @@ namespace cAlgo
             }
 
             Print("Error: ", error);
+        }
+
+        protected override void OnStop()
+        {
+            PreserveMaxProfitAndLoss();
+
+            if (CloseOnStop)
+                CloseAllPositions();
+
+            Print("Max Profit Date: ", maxProfitDate);
+            Print("Max Profit: ", maxProfit);
+            Print("Max Loss Date: ", maxLossDate);
+            Print("Max Loss: ", maxLoss);
+        }
+
+        private double GetOperationsBalance()
+        {
+            var balance = 0.0;
+
+            foreach (var position in Positions.FindAll(Label, Symbol))
+                balance += position.GrossProfit;
+
+            operationsBalance = balance;
+
+            return balance;
+        }
+
+        private void PreserveMaxProfitAndLoss()
+        {
+            var balance = GetOperationsBalance();
+
+            if (balance >= maxProfit)
+            {
+                maxProfit = balance;
+                maxProfitDate = Time;
+            }
+
+            if (balance <= maxLoss)
+            {
+                maxLoss = balance;
+                maxLossDate = Time;
+            }
         }
 
         private void OpenPosition()
@@ -98,6 +179,32 @@ namespace cAlgo
             }
 
             MakeAveragePrice();
+        }
+
+        private void CloseAllPositions()
+        {
+            foreach (var position in Positions.FindAll(Label, Symbol))
+                ClosePosition(position);
+        }
+
+        private void RiskModifyTakeProfitAndStopLoss()
+        {
+            foreach (var position in Positions.FindAll(Label, Symbol))
+            {
+                var stopLoss = Math.Round(GetAbsoluteStopLoss(position, TakeProfitAverage), Symbol.Digits);
+                var takeProfit = Math.Round(GetAbsoluteTakeProfit(position, TakeProfitAverage), Symbol.Digits);
+
+                if (position.Pips <= 0)
+                {
+                    var pips = Math.Abs(position.Pips) + TakeProfitAverage;
+
+                    stopLoss = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Bid - Symbol.PipSize * pips : Symbol.Ask + Symbol.PipSize * pips, Symbol.Digits);
+                    takeProfit = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Ask + Symbol.PipSize * pips : Symbol.Bid - Symbol.PipSize * pips, Symbol.Digits);
+                }
+
+                if (Math.Round(position.StopLoss ?? 0, Symbol.Digits) != stopLoss || Math.Round(position.TakeProfit ?? 0, Symbol.Digits) != takeProfit)
+                    ModifyPosition(position, stopLoss, takeProfit);
+            }
         }
 
         private void MakeAveragePrice()
@@ -142,7 +249,7 @@ namespace cAlgo
                 return false;
             }
 
-            TradeResult result = ExecuteMarketOrder(tradeType, Symbol, volume, Label, 0, 0, 0, "smart_grid");
+            TradeResult result = ExecuteMarketOrder(tradeType, Symbol, volume, Label, StopLossPips, 0, 0, "smart_grid");
 
             if (!result.IsSuccessful)
             {
@@ -150,8 +257,6 @@ namespace cAlgo
 
                 return false;
             }
-
-            Print("Opened at: ", result.Position.EntryPrice);
 
             return true;
         }
@@ -262,6 +367,16 @@ namespace cAlgo
             int totalOperation = GetTotalOperationOnPrice(tradeType, firstEntryPrice);
 
             return Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation <= 0 ? 1 : totalOperation));
+        }
+
+        private double GetAbsoluteStopLoss(Position position, double stopLossPips)
+        {
+            return position.TradeType == TradeType.Buy ? position.EntryPrice - Symbol.PipSize * stopLossPips : position.EntryPrice + Symbol.PipSize * stopLossPips;
+        }
+
+        private double GetAbsoluteTakeProfit(Position position, double takeProfitPips)
+        {
+            return position.TradeType == TradeType.Buy ? position.EntryPrice + Symbol.PipSize * takeProfitPips : position.EntryPrice - Symbol.PipSize * takeProfitPips;
         }
     }
 }
