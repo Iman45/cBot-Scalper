@@ -26,9 +26,6 @@ namespace cAlgo
         [Parameter("Lots", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01)]
         public double Lots { get; set; }
 
-        [Parameter("Fix Stop Loss Pips", DefaultValue = 100, MinValue = 0)]
-        public double FixStopLossPips { get; set; }
-
         [Parameter("Volume Exponent", DefaultValue = 1, MinValue = 0.1, MaxValue = 5.0)]
         public double VolumeExponent { get; set; }
 
@@ -37,6 +34,9 @@ namespace cAlgo
 
         [Parameter("Take Profit Average Pips", DefaultValue = 21, MinValue = 0.01)]
         public double TakeProfitAveragePips { get; set; }
+
+        [Parameter("Fix Stop Loss Pips", DefaultValue = 100, MinValue = 0)]
+        public double FixStopLossPips { get; set; }
 
         [Parameter("Close On Stop", DefaultValue = false)]
         public bool CloseOnStop { get; set; }
@@ -78,10 +78,10 @@ namespace cAlgo
                 GetOperationsBalance();
 
                 if (TotalOpenPositions(TradeType.Buy) > 0 && !UseRiskStrategy)
-                    SetBuyTakeProfit(AveragePrice(TradeType.Buy), TakeProfitAverage);
+                    SetBuyTakeProfit(AveragePricePerVolume(TradeType.Buy), TakeProfitAveragePips);
 
                 if (TotalOpenPositions(TradeType.Sell) > 0 && !UseRiskStrategy)
-                    SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAverage);
+                    SetSellTakeProfit(AveragePricePerVolume(TradeType.Sell), TakeProfitAveragePips);
 
                 if (spreedValue <= MaxSpread && !HasRick && !stopped)
                     OpenPosition();
@@ -191,12 +191,12 @@ namespace cAlgo
         {
             foreach (var position in Positions.FindAll(Label, Symbol))
             {
-                var stopLoss = Math.Round(GetAbsoluteStopLoss(position, TakeProfitAverage), Symbol.Digits);
-                var takeProfit = Math.Round(GetAbsoluteTakeProfit(position, TakeProfitAverage), Symbol.Digits);
+                var stopLoss = Math.Round(GetAbsoluteStopLoss(position, TakeProfitAveragePips), Symbol.Digits);
+                var takeProfit = Math.Round(GetAbsoluteTakeProfit(position, TakeProfitAveragePips), Symbol.Digits);
 
                 if (position.Pips <= 0)
                 {
-                    var pips = Math.Abs(position.Pips) + TakeProfitAverage;
+                    var pips = Math.Abs(position.Pips) + TakeProfitAveragePips;
 
                     stopLoss = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Bid - Symbol.PipSize * pips : Symbol.Ask + Symbol.PipSize * pips, Symbol.Digits);
                     takeProfit = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Ask + Symbol.PipSize * pips : Symbol.Bid - Symbol.PipSize * pips, Symbol.Digits);
