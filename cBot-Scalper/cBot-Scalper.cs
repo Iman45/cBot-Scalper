@@ -51,10 +51,10 @@ namespace cAlgo
                 spreedValue = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
 
                 if (TotalOpenPositions(TradeType.Buy) > 0)
-                    SetBuyTakeProfit(AveragePrice(TradeType.Buy), TakeProfitAveragePips);
+                    SetBuyTakeProfit(AveragePricePerVolume(TradeType.Buy), TakeProfitAveragePips);
 
                 if (TotalOpenPositions(TradeType.Sell) > 0)
-                    SetSellTakeProfit(AveragePrice(TradeType.Sell), TakeProfitAveragePips);
+                    SetSellTakeProfit(AveragePricePerVolume(TradeType.Sell), TakeProfitAveragePips);
 
                 if (spreedValue <= MaxSpread && !stopped)
                     OpenPosition();
@@ -159,11 +159,11 @@ namespace cAlgo
             return true;
         }
 
-        private void SetBuyTakeProfit(double averagePrice, double takeProfitAveragePips)
+        private void SetBuyTakeProfit(double averagePricePerVolume, double takeProfitAveragePips)
         {
             foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Buy))
             {
-                double? takeProfit = Math.Round(averagePrice + takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
+                double? takeProfit = Math.Round(averagePricePerVolume + takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
 
                 if (position.TakeProfit != takeProfit)
                 {
@@ -175,11 +175,11 @@ namespace cAlgo
             }
         }
 
-        private void SetSellTakeProfit(double averagePrice, double takeProfitAveragePips)
+        private void SetSellTakeProfit(double averagePricePerVolume, double takeProfitAveragePips)
         {
             foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Sell))
             {
-                double? takeProfit = Math.Round(averagePrice - takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
+                double? takeProfit = Math.Round(averagePricePerVolume - takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
 
                 if (position.TakeProfit != takeProfit)
                 {
@@ -196,19 +196,19 @@ namespace cAlgo
             return Positions.FindAll(Label, Symbol, tradeType).Length;
         }
 
-        private double AveragePrice(TradeType tradeType)
+        private double AveragePricePerVolume(TradeType tradeType)
         {
-            double totalPositionValue = 0;
+            double totalPrice = 0;
             long totalVolume = 0;
 
             foreach (var position in Positions.FindAll(Label, Symbol, tradeType))
             {
-                totalPositionValue += position.EntryPrice * position.Volume;
+                totalPrice += position.EntryPrice * position.Volume;
                 totalVolume += position.Volume;
             }
 
-            if (totalPositionValue > 0 && totalVolume > 0)
-                return Math.Round(totalPositionValue / totalVolume, Symbol.Digits);
+            if (totalPrice > 0 && totalVolume > 0)
+                return Math.Round(totalPrice / totalVolume, Symbol.Digits);
 
             return 0;
         }
