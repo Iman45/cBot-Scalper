@@ -1,400 +1,164 @@
-﻿//+------------------------------------------------------------------+
-//|                                                  Smart Grid      |
-//|                                      Copyright 2014, MD SAIF     |
-//|                                   http://www.facebook.com/cls.fx |
-//+------------------------------------------------------------------+
-//-Grid trader cBot based on Bar-Time & Trend. For range market & 15 minute TimeFrame is best.
-
-using System;
-using System.Linq;
+﻿using System;
 using cAlgo.API;
+using cAlgo.API.Indicators;
 
-namespace cAlgo
+namespace cAlgo.Robots
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
-    public class cBotScalper : Robot
+    public class NewRobot : Robot
     {
-        [Parameter("Buy Enabled", DefaultValue = true)]
-        public bool BuyEnabled { get; set; }
+        [Parameter("Vol", DefaultValue = 10000)]  
+        public int Vol { get; set; }
 
-        [Parameter("Sell Enabled", DefaultValue = true)]
-        public bool SellEnabled { get; set; }
+        [Parameter("SL", DefaultValue = 200)]
+        public int SL { get; set; }
 
-        [Parameter("Pip Step", DefaultValue = 1, MinValue = 0.01)]
-        public double PipStep { get; set; }
+        [Parameter("TP", DefaultValue = 200)]
+        public int TP { get; set; }
 
-        [Parameter("Lots", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01)]
-        public double Lots { get; set; }
+        [Parameter("Tral_Start", DefaultValue = 150)]
+        public int Tral_Start { get; set; }
 
-        [Parameter("Volume Exponent", DefaultValue = 1, MinValue = 0.1, MaxValue = 5.0)]
-        public double VolumeExponent { get; set; }
+        [Parameter("Tral_Stop", DefaultValue = 100)]
+        public int Tral_Stop { get; set; }
 
-        [Parameter("Max Spread", DefaultValue = 3, MinValue = 0)]
-        public double MaxSpread { get; set; }
+        [Parameter("MA_price")]
+        public DataSeries MA_price { get; set; }
 
-        [Parameter("Take Profit Average Pips", DefaultValue = 21, MinValue = 0.01)]
-        public double TakeProfitAveragePips { get; set; }
+        [Parameter("MA_period", DefaultValue = 18)]
+        public int MA_period { get; set; }
 
-        [Parameter("Fix Stop Loss Pips", DefaultValue = 100, MinValue = 0)]
-        public double FixStopLossPips { get; set; }
+        [Parameter("MAType")]
+        public MovingAverageType MAType { get; set; }
 
-        [Parameter("Close On Stop", DefaultValue = false)]
-        public bool CloseOnStop { get; set; }
+        [Parameter("WPR_period", DefaultValue = 11)]
+        public int WPR_period { get; set; }
 
-        public bool HasRick
+        [Parameter("Period_K1", DefaultValue = 14)]
+        public int Period_K1 { get; set; }
+
+        [Parameter("Period_D1", DefaultValue = 5)]
+        public int Period_D1 { get; set; }
+
+        [Parameter("Slowing1", DefaultValue = 5)]
+        public int Slowing1 { get; set; }
+
+        [Parameter("St_Ma_Type1")]
+        public MovingAverageType St_Ma_Type1 { get; set; }
+
+        [Parameter("Period_K2", DefaultValue = 4)]
+        public int Period_K2 { get; set; }
+
+        [Parameter("Period_D2", DefaultValue = 3)]
+        public int Period_D2 { get; set; }
+
+        [Parameter("Slowing2", DefaultValue = 3)]
+        public int Slowing2 { get; set; }
+
+        [Parameter("St_Ma_Type2")]
+        public MovingAverageType St_Ma_Type2 { get; set; }
+
+
+        private MovingAverage MA;
+        private WilliamsPctR WPR;
+        private StochasticOscillator St1;
+        private StochasticOscillator St2;
+        private Position position1;
+        private int a;
+
+        protected override void OnStart()
         {
-            get { return UseRiskStrategy || FridayCloseOperations; }
+            Print("Welcome to the world of infinite financial possibilities!");
+            MA = Indicators.MovingAverage(MA_price, MA_period, MAType);
+            WPR = Indicators.WilliamsPctR(WPR_period);
+            St1 = Indicators.StochasticOscillator(Period_K1, Period_D1, Slowing1, St_Ma_Type1);
+            St2 = Indicators.StochasticOscillator(Period_K2, Period_D2, Slowing2, St_Ma_Type2);
         }
 
-        public bool UseRiskStrategy
+        protected override void OnPositionOpened(Position openedPosition)
         {
-            get { return Time.DayOfWeek == DayOfWeek.Friday && Time.ToUniversalTime().TimeOfDay >= fridayUseRiskStrategy; }
-        }
+            position1 = openedPosition;
 
-        public bool FridayCloseOperations
-        {
-            get { return Time.DayOfWeek == DayOfWeek.Friday && Time.ToUniversalTime().TimeOfDay >= fridayCloseOperations; }
-        }
+            if (position1.TradeType == TradeType.Buy)
+            {
+                Trade.ModifyPosition(openedPosition, position1.EntryPrice - SL * Symbol.PointSize, position1.EntryPrice + TP * Symbol.PointSize);
+                Print("StopLoss and TakeProfit were successfully established");
+            }
 
-        private string Label = "cls";
-        private DateTime buyLastOpenTime;
-        private DateTime sellLastOpenTime;
-        private double spreedValue;
-        private bool stopped = false;
-        private double operationsBalance = 0;
-        private DateTime maxProfitDate;
-        private double maxProfit = 0;
-        private DateTime maxLossDate;
-        private double maxLoss = 0;
-        private TimeSpan fridayUseRiskStrategy = new TimeSpan(0, 0, 0);
-        private TimeSpan fridayCloseOperations = new TimeSpan(19, 0, 0);
+            if (position1.TradeType == TradeType.Sell)
+            {
+                Trade.ModifyPosition(openedPosition, position1.EntryPrice + SL * Symbol.PointSize, position1.EntryPrice - TP * Symbol.PointSize);
+                Print("StopLoss and TakeProfit were successfully established");
+            }
+        }
 
         protected override void OnTick()
         {
-            try
+
+            int bars = MarketSeries.Close.Count - 1;
+            double cl1 = MarketSeries.Close[bars - 1];
+            double cl2 = MarketSeries.Close[bars - 2];
+
+            double MA1 = MA.Result[MA.Result.Count - 2];
+            double MA2 = MA.Result[MA.Result.Count - 3];
+            double WPR1 = WPR.Result[WPR.Result.Count - 2];
+            double St11 = St1.PercentK[St1.PercentK.Count - 2];
+            double St21 = St1.PercentD[St1.PercentD.Count - 2];
+            double St12 = St2.PercentD[St2.PercentD.Count - 2];
+
+            double Bid = Symbol.Bid;
+            double Ask = Symbol.Ask;
+            double Point = Symbol.PointSize;
+
+            if (Trade.IsExecuting)
+                return;
+
+            if (WPR1 > -50 && cl1 > MA1 && cl2 <= MA2 && St11 > St21 && St12 > 20 && a == 0)
             {
-                spreedValue = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
-
-                GetOperationsBalance();
-
-                if (TotalOpenPositions(TradeType.Buy) > 0 && !UseRiskStrategy)
-                    SetBuyTakeProfit(AveragePricePerVolume(TradeType.Buy), TakeProfitAveragePips);
-
-                if (TotalOpenPositions(TradeType.Sell) > 0 && !UseRiskStrategy)
-                    SetSellTakeProfit(AveragePricePerVolume(TradeType.Sell), TakeProfitAveragePips);
-
-                if (spreedValue <= MaxSpread && !HasRick && !stopped)
-                    OpenPosition();
-
-                if (UseRiskStrategy)
-                    RiskModifyTakeProfitAndStopLoss();
-
-                if (TotalOpenPositions(TradeType.Sell) > 0 || TotalOpenPositions(TradeType.Buy) > 0)
-                    PreserveMaxProfitAndLoss();
-
-                if (FridayCloseOperations)
-                    CloseAllPositions();
-            } catch (Exception e)
-            {
-                Print(e);
-
-                throw;
+                Trade.CreateBuyMarketOrder(Symbol, Vol);
+                Print("Trade BUY was successfully open");
+                a = 1;
             }
+
+            if (WPR1 < -50 && cl1 < MA1 && cl2 >= MA2 && St11 < St21 && St12 < 80 && a == 0)
+            {
+                Trade.CreateSellMarketOrder(Symbol, Vol);
+                Print("Trade SELL was successfully open");
+                a = 1;
+            }
+
+            foreach (var position in Account.Positions)
+            {
+                if (position.SymbolCode == Symbol.Code)
+                {
+
+                    if (position.TradeType == TradeType.Buy)
+                    {
+                        if (Bid - position.EntryPrice >= Tral_Start * Point)
+                            if (Bid - Tral_Stop * Point >= position.StopLoss)
+                                Trade.ModifyPosition(position, Bid - Tral_Stop * Point, position.TakeProfit);
+                    }
+
+                    if (position.TradeType == TradeType.Sell)
+                    {
+                        if (position.EntryPrice - Ask >= Tral_Start * Point)
+                            if (Ask + Tral_Stop * Point <= position.StopLoss)
+                                Trade.ModifyPosition(position, Ask + Tral_Stop * Point, position.TakeProfit);
+                    }
+                }
+            }
+
         }
 
-        protected override void OnError(Error error)
+        protected override void OnPositionClosed(Position pos)
         {
-            if (error.Code == ErrorCode.NoMoney)
-            {
-                stopped = true;
-
-                Print("Openning stopped because: not enough money");
-            }
-
-            Print("Error: ", error);
+            a = 0;
         }
 
         protected override void OnStop()
         {
-            PreserveMaxProfitAndLoss();
-
-            if (CloseOnStop)
-                CloseAllPositions();
-
-            Print("Max Profit Date: ", maxProfitDate);
-            Print("Max Profit: ", maxProfit);
-            Print("Max Loss Date: ", maxLossDate);
-            Print("Max Loss: ", maxLoss);
+            Print("Successful day!");
         }
 
-        private double GetOperationsBalance()
-        {
-            var balance = 0.0;
-
-            foreach (var position in Positions.FindAll(Label, Symbol))
-                balance += position.GrossProfit;
-
-            operationsBalance = balance;
-
-            return balance;
-        }
-
-        private void PreserveMaxProfitAndLoss()
-        {
-            var balance = GetOperationsBalance();
-
-            if (balance >= maxProfit)
-            {
-                maxProfit = balance;
-                maxProfitDate = Time;
-            }
-
-            if (balance <= maxLoss)
-            {
-                maxLoss = balance;
-                maxLossDate = Time;
-            }
-        }
-
-        private void OpenPosition()
-        {
-            if (BuyEnabled && TotalOpenPositions(TradeType.Buy) == 0 && MarketSeries.Close.Last(1) > MarketSeries.Close.Last(2))
-            {
-                var success = SendOrder(TradeType.Buy, Symbol.QuantityToVolume(Lots));
-
-                if (success)
-                    buyLastOpenTime = MarketSeries.OpenTime.Last(0);
-                else
-                    Print("First BUY openning error at: {0}, Error Type: {1}", Symbol.Ask, LastResult.Error);
-            }
-
-            if (SellEnabled && TotalOpenPositions(TradeType.Sell) == 0 && MarketSeries.Close.Last(2) > MarketSeries.Close.Last(1))
-            {
-                var success = SendOrder(TradeType.Sell, Symbol.QuantityToVolume(Lots));
-
-                if (success)
-                    sellLastOpenTime = MarketSeries.OpenTime.Last(0);
-                else
-                    Print("First SELL openning error at: {0}, Error Type: {1}", Symbol.Bid, LastResult.Error);
-            }
-
-            MakeAveragePrice();
-        }
-
-        private void CloseAllPositions()
-        {
-            foreach (var position in Positions.FindAll(Label, Symbol))
-                ClosePosition(position);
-        }
-
-        private void RiskModifyTakeProfitAndStopLoss()
-        {
-            foreach (var position in Positions.FindAll(Label, Symbol))
-            {
-                var stopLoss = Math.Round(GetAbsoluteStopLoss(position, TakeProfitAveragePips), Symbol.Digits);
-                var takeProfit = Math.Round(GetAbsoluteTakeProfit(position, TakeProfitAveragePips), Symbol.Digits);
-
-                if (position.Pips <= 0)
-                {
-                    var pips = Math.Abs(position.Pips) + TakeProfitAveragePips;
-
-                    stopLoss = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Bid - Symbol.PipSize * pips : Symbol.Ask + Symbol.PipSize * pips, Symbol.Digits);
-                    takeProfit = Math.Round(position.TradeType == TradeType.Buy ? Symbol.Ask + Symbol.PipSize * pips : Symbol.Bid - Symbol.PipSize * pips, Symbol.Digits);
-                }
-
-                if (Math.Round(position.StopLoss ?? 0, Symbol.Digits) != stopLoss || Math.Round(position.TakeProfit ?? 0, Symbol.Digits) != takeProfit)
-                    ModifyPosition(position, stopLoss, takeProfit);
-            }
-        }
-
-        private void MakeAveragePrice()
-        {
-            if (TotalOpenPositions(TradeType.Buy) > 0)
-            {
-                if (Math.Round(Symbol.Ask, Symbol.Digits) < Math.Round(GetMinEntryPrice(TradeType.Buy) - PipStep * Symbol.PipSize, Symbol.Digits) && buyLastOpenTime != MarketSeries.OpenTime.Last(0))
-                {
-                    long volume = CalculateVolume(TradeType.Buy);
-
-                    var success = SendOrder(TradeType.Buy, volume);
-
-                    if (success)
-                        buyLastOpenTime = MarketSeries.OpenTime.Last(0);
-                    else
-                        Print("Next BUY openning error at: {0}, Error Type: {1}", Symbol.Ask, LastResult.Error);
-                }
-            }
-
-            if (TotalOpenPositions(TradeType.Sell) > 0)
-            {
-                if (Math.Round(Symbol.Bid, Symbol.Digits) > Math.Round(GetMaxEntryPrice(TradeType.Sell) + PipStep * Symbol.PipSize, Symbol.Digits) && sellLastOpenTime != MarketSeries.OpenTime.Last(0))
-                {
-                    long volume = CalculateVolume(TradeType.Sell);
-
-                    var success = SendOrder(TradeType.Sell, volume);
-
-                    if (success)
-                        sellLastOpenTime = MarketSeries.OpenTime.Last(0);
-                    else
-                        Print("Next SELL openning error at: {0}, Error Type: {1}", Symbol.Bid, LastResult.Error);
-                }
-            }
-        }
-
-        private bool SendOrder(TradeType tradeType, long volume)
-        {
-            if (volume <= 0)
-            {
-                Print("Volume calculation error: Calculated Volume is: ", volume);
-
-                return false;
-            }
-
-            TradeResult result = ExecuteMarketOrder(tradeType, Symbol, volume, Label, FixStopLossPips, 0, 0, "smart_grid");
-
-            if (!result.IsSuccessful)
-            {
-                Print("Openning Error: ", result.Error);
-
-                return false;
-            }
-
-            return true;
-        }
-
-        private void SetBuyTakeProfit(double averagePricePerVolume, double takeProfitAveragePips)
-        {
-            foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Buy))
-            {
-                double? takeProfit = Math.Round(averagePricePerVolume + takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
-
-                if (position.TakeProfit != takeProfit)
-                {
-                    TradeResult result = ModifyPosition(position, position.StopLoss, takeProfit);
-
-                    if (!result.IsSuccessful)
-                        Print("Modify Error: ", result.Error);
-                }
-            }
-        }
-
-        private void SetSellTakeProfit(double averagePricePerVolume, double takeProfitAveragePips)
-        {
-            foreach (var position in Positions.FindAll(Label, Symbol, TradeType.Sell))
-            {
-                double? takeProfit = Math.Round(averagePricePerVolume - takeProfitAveragePips * Symbol.PipSize, Symbol.Digits);
-
-                if (position.TakeProfit != takeProfit)
-                {
-                    TradeResult result = ModifyPosition(position, position.StopLoss, takeProfit);
-
-                    if (!result.IsSuccessful)
-                        Print("Modify Error: ", result.Error);
-                }
-            }
-        }
-
-        private int TotalOpenPositions(TradeType tradeType)
-        {
-            return Positions.FindAll(Label, Symbol, tradeType).Length;
-        }
-
-        private double AveragePricePerVolume(TradeType tradeType)
-        {
-            double totalPrice = 0;
-            long totalVolume = 0;
-
-            foreach (var position in Positions.FindAll(Label, Symbol, tradeType))
-            {
-                totalPrice += position.EntryPrice * position.Volume;
-                totalVolume += position.Volume;
-            }
-
-            if (totalPrice > 0 && totalVolume > 0)
-                return Math.Round(totalPrice / totalVolume, Symbol.Digits);
-
-            return 0;
-        }
-
-        private double GetMinEntryPrice(TradeType tradeType)
-        {
-            var positions = Positions.FindAll(Label, Symbol, tradeType);
-
-            if (positions.Length == 0)
-                return 0;
-
-            return positions.Min(i => i.EntryPrice);
-        }
-
-        private double GetMaxEntryPrice(TradeType tradeType)
-        {
-            var positions = Positions.FindAll(Label, Symbol, tradeType);
-
-            if (positions.Length == 0)
-                return 0;
-
-            return positions.Max(i => i.EntryPrice);
-        }
-
-        private double GetFirstEntryPrice(TradeType tradeType)
-        {
-            var lastPosition = Positions.FindAll(Label, Symbol, tradeType).OrderBy(i => i.Id).FirstOrDefault();
-
-            if (lastPosition == null)
-                return 0;
-
-            return lastPosition.EntryPrice;
-        }
-
-        private long GetFirstVolume(TradeType tradeType)
-        {
-            var lastPosition = Positions.FindAll(Label, Symbol, tradeType).OrderBy(i => i.Id).FirstOrDefault();
-
-            if (lastPosition == null)
-                return 0;
-
-            return lastPosition.Volume;
-        }
-
-        private long PositionVolume(TradeType tradeType)
-        {
-            return Positions.FindAll(Label, Symbol, tradeType).Sum(i => i.Volume);
-        }
-
-        private int GetTotalOperationBelowPrice(TradeType tradeType, double price)
-        {
-            var positions = Positions.FindAll(Label, Symbol, tradeType);
-
-            if (tradeType == TradeType.Buy)
-                return positions.Count(i => Math.Round(i.EntryPrice, Symbol.Digits) <= Math.Round(price, Symbol.Digits));
-
-            return positions.Count(i => Math.Round(i.EntryPrice, Symbol.Digits) >= Math.Round(price, Symbol.Digits));
-        }
-
-        private long CalculateVolume(TradeType tradeType)
-        {
-            double firstEntryPrice = GetFirstEntryPrice(tradeType);
-            long firstVolume = GetFirstVolume(tradeType);
-            int totalOperation = GetTotalOperationBelowPrice(tradeType, firstEntryPrice);
-
-            var volume = Symbol.NormalizeVolume(firstVolume * Math.Pow(VolumeExponent, totalOperation == 0 ? 1 : totalOperation));
-
-            if (volume > Symbol.VolumeMax)
-                return Symbol.VolumeMax;
-
-            if (volume < Symbol.VolumeMin)
-                return Symbol.VolumeMin;
-
-            return volume;
-        }
-
-        private double GetAbsoluteStopLoss(Position position, double stopLossPips)
-        {
-            return position.TradeType == TradeType.Buy ? position.EntryPrice - Symbol.PipSize * stopLossPips : position.EntryPrice + Symbol.PipSize * stopLossPips;
-        }
-
-        private double GetAbsoluteTakeProfit(Position position, double takeProfitPips)
-        {
-            return position.TradeType == TradeType.Buy ? position.EntryPrice + Symbol.PipSize * takeProfitPips : position.EntryPrice - Symbol.PipSize * takeProfitPips;
-        }
     }
 }
